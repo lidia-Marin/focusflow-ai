@@ -73,7 +73,7 @@ export class DashboardComponent implements OnInit {
     this.loading = true;
     localStorage.setItem('task', this.taskInput);
 
-    this.http.post<any>('http://localhost:3000/analyze', {
+    this.http.post<any>('https://focusflow-ai-isls.onrender.com/analyze', {
       task: this.taskInput,
       profile: this.profile
     })
@@ -378,4 +378,5 @@ export class DashboardComponent implements OnInit {
   saveProfile() {
     localStorage.setItem('profile', this.profile);
   }
+  
 }

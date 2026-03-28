@@ -7,7 +7,12 @@ const OpenAI = require('openai');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors({ origin: 'http://localhost:4200' }));
+app.use(cors({
+  origin: [
+    'http://localhost:4200', // desarrollo
+    'https://focusflow-ai-pi.vercel.app' // tu frontend en Vercel
+  ]
+}));
 app.use(express.json());
 
 let client = null;
