@@ -1,0 +1,8 @@
+<div *ngIf="steps.length">
+  <h2>Pasos sugeridos</h2>
+
+  <div *ngFor="let step of steps">
+    <input type="checkbox" />
+    {{ step.text }} ({{ step.time }})
+  </div>
+</div>
