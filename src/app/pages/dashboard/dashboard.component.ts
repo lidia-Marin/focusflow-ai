@@ -1,26 +1,33 @@
-import { Component, OnInit, ChangeDetectorRef } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpClientModule } from '@angular/common/http';
 import { timeout } from 'rxjs/operators';
+import * as pdfjsLib from 'pdfjs-dist';
+
+(pdfjsLib as any).GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, HttpClientModule],
   templateUrl: './dashboard.component.html',
   styleUrl: './dashboard.component.scss'
 })
-export class DashboardComponent implements OnInit {
+export class DashboardComponent implements OnInit, OnDestroy {
 
+  // =============================
+  // ESTADO
+  // =============================
   taskInput = '';
+  pdfText = '';
   profile = 'adhd';
   steps: any[] = [];
 
   difficulty = '';
   totalTime = '';
   explanation = '';
-
   loading = false;
 
   minutes = 25;
@@ -29,61 +36,126 @@ export class DashboardComponent implements OnInit {
 
   focusMode = false;
   currentStepIndex = 0;
-  showExplanation = false;
-  motivationalMessage = '';
 
+  motivationalMessage = '';
   sessionPaused = false;
   notificationsInterval: any = null;
+
+  showExplanation = true;
 
   constructor(
     private http: HttpClient,
     private cdr: ChangeDetectorRef
   ) {}
 
+  // =============================
+  // INIT
+  // =============================
   ngOnInit() {
 
+    if ("Notification" in window) {
+    Notification.requestPermission();
+    }
     const savedSteps = localStorage.getItem('steps');
     const savedTask = localStorage.getItem('task');
     const savedProfile = localStorage.getItem('profile');
 
     if (savedSteps) this.steps = JSON.parse(savedSteps);
     if (savedTask) this.taskInput = savedTask;
-    if (savedProfile) this.profile = savedProfile;
+
+    if (savedProfile) {
+      this.profile = savedProfile;
+      this.applyDyslexiaFont(savedProfile);
+    }
 
     this.startReminders();
     this.startNotifications();
+  }
 
-    const savedTimer = localStorage.getItem('timer');
-    if (savedTimer) {
-      const t = JSON.parse(savedTimer);
-      this.minutes = t.minutes;
-      this.seconds = t.seconds;
+  ngOnDestroy() {
+    this.pause();
+    this.stopNotifications();
+  }
+
+  // =============================
+  // GETTERS
+  // =============================
+  get profileIntro(): string {
+    if (this.profile === 'adhd') return "🧠 Bloques cortos + pausas.";
+    if (this.profile === 'autism') return "📋 Lenguaje claro y literal.";
+    if (this.profile === 'dyslexia') return "📖 Lectura visual simplificada.";
+    return "";
+  }
+
+  get progress(): number {
+    if (!this.steps.length) return 0;
+    const done = this.steps.filter(s => s.done).length;
+    return Math.round((done / this.steps.length) * 100);
+  }
+
+  get isCompleted(): boolean {
+    return this.progress === 100 && this.steps.length > 0;
+  }
+
+  get completedTasks(): number {
+    return this.steps.filter(s => s.done).length;
+  }
+
+  get focusTime(): number {
+    return this.steps.reduce((acc, s) => acc + (s.done ? parseInt(s.time) : 0), 0);
+  }
+
+  get formattedTime(): string {
+    const m = this.minutes < 10 ? '0' + this.minutes : this.minutes;
+    const s = this.seconds < 10 ? '0' + this.seconds : this.seconds;
+    return `${m}:${s}`;
+  }
+
+  // =============================
+  // PERFIL
+  // =============================
+  saveProfile() {
+    localStorage.setItem('profile', this.profile);
+    this.applyDyslexiaFont(this.profile);
+  }
+
+  applyDyslexiaFont(profile: string) {
+    if (profile === 'dyslexia') {
+      document.body.classList.add('dyslexic-font');
+    } else {
+      document.body.classList.remove('dyslexic-font');
     }
   }
 
+  simplifyText(text: string): string {
+    return text.replace(/,/g, '').replace(/\*\*/g, '').split(' ').join(' • ');
+  }
+
+  // =============================
+  // IA
+  // =============================
   analyzeTask() {
 
-    if (!this.taskInput.trim()) {
-      alert('⚠️ Escribe una tarea primero');
+    const finalText = this.pdfText || this.taskInput;
+
+    if (!finalText || finalText.trim().length < 5) {
+      alert('⚠️ Escribe algo o sube un PDF');
       return;
     }
 
-    if (this.loading) return;
-
     this.loading = true;
-    localStorage.setItem('task', this.taskInput);
 
-    this.http.post<any>('https://focusflow-ai-isls.onrender.com/analyze', {
-      task: this.taskInput,
+    this.http.post<any>('http://localhost:3000/analyze', {
+      task: finalText,
       profile: this.profile
     })
-    .pipe(timeout(10000))
+    .pipe(timeout(20000))
     .subscribe({
-
       next: (res) => {
 
         this.steps = res.steps.map((s: any) => ({
-          ...s,
+          text: s.text.replace(/\*\*/g, ''),
+          time: s.time,
           done: false
         }));
 
@@ -94,205 +166,137 @@ export class DashboardComponent implements OnInit {
         this.minutes = this.parseTimeToMinutes(res.totalTime);
         this.seconds = 0;
 
-        this.currentStepIndex = 0;
-        this.sessionPaused = false;
-        this.focusMode = false;
-
-        localStorage.setItem('steps', JSON.stringify(this.steps));
-
         this.loading = false;
         this.cdr.detectChanges();
       },
-
       error: () => {
-
-        this.steps = [
-          { text: "Leer tarea", time: "5", done: false },
-          { text: "Dividir en pasos", time: "10", done: false },
-          { text: "Empezar", time: "10", done: false }
-        ];
-
-        this.difficulty = "fácil";
-        this.totalTime = "25 min";
-        this.explanation = "Se simplificó la tarea.";
-
         this.loading = false;
+        alert("❌ Error analizando");
       }
     });
   }
 
-  parseTimeToMinutes(time: string): number {
-    const match = time.match(/\d+/);
-    return match ? parseInt(match[0], 10) : 25;
-  }
+  // =============================
+  // PDF
+  // =============================
+  async onFileSelected(event: any) {
+  const file = event.target.files[0];
+  if (!file) return;
 
-  // 🔥 NORMAL STEP
+  this.loading = true;
+
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+
+    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+    const pdf = await loadingTask.promise;
+
+    let fullText = '';
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+
+      const strings = content.items.map((item: any) => item.str);
+      fullText += strings.join(' ') + '\n';
+    }
+
+    this.pdfText = fullText.replace(/\s+/g, ' ').trim().slice(0, 3000);
+    this.taskInput = this.pdfText;
+
+    if (this.pdfText.length < 20) {
+      alert("⚠️ PDF sin texto");
+      this.loading = false;
+      return;
+    }
+
+    setTimeout(() => this.analyzeTask(), 300);
+
+  } catch (error) {
+    console.error(error);
+    alert("❌ Error leyendo PDF");
+  } finally {
+    this.loading = false;
+    this.cdr.detectChanges();
+  }
+}
+
+  // =============================
+  // PASOS
+  // =============================
   toggleStepWithTime(index: number) {
-
     const step = this.steps[index];
+    const time = parseInt(step.time) || 0;
 
-    if (!step.done) {
-      step.done = true;
+    this.minutes += step.done ? -time : time;
 
-      const stepTime = parseInt(step.time) || 0;
-      this.minutes -= stepTime;
-
-      if (this.minutes < 0) this.minutes = 0;
-    }
-    if (this.progress === 100) {
-      this.stopNotifications();
-    }
-
-    this.updateProgress(index);
+    this.checkCompletion();
+    this.saveSession();
   }
 
-  // 🔥 FOCUS MODE STEP
   completeStepFromFocus() {
-
     if (this.currentStepIndex >= this.steps.length) return;
 
     const step = this.steps[this.currentStepIndex];
 
     if (!step.done) {
       step.done = true;
-
-      const stepTime = parseInt(step.time) || 0;
-      this.minutes -= stepTime;
-
-      if (this.minutes < 0) this.minutes = 0;
+      this.minutes -= parseInt(step.time) || 0;
     }
 
-    this.updateProgress(this.currentStepIndex);
-  }
+    this.currentStepIndex++;
 
-  // 🔥 CONTROL CENTRAL DE PROGRESO
-  updateProgress(index: number) {
-
-    if (index === this.currentStepIndex) {
-      this.currentStepIndex++;
-    }
-
-    // 🔥 si termina todo
     if (this.currentStepIndex >= this.steps.length) {
       this.focusMode = false;
-      this.stopNotifications();
     }
 
-    localStorage.setItem('steps', JSON.stringify(this.steps));
-    this.steps = [...this.steps];
+    this.checkCompletion();
+    this.saveSession();
   }
 
-  // 🧠 PERFIL
-  get profileIntro() {
-    if (this.profile === 'adhd') return "🧠 Bloques cortos + pausas.";
-    if (this.profile === 'autism') return "📋 Estructura clara.";
-    if (this.profile === 'dyslexia') return "📖 Lectura simplificada.";
-    return "";
-  }
-
-  // 📊 MÉTRICAS
-  get completedTasks() {
-    return this.steps.filter(s => s.done).length;
-  }
-
-  get focusTime() {
-    return this.steps.reduce((acc, s) =>
-      acc + (s.done ? parseInt(s.time) : 0), 0);
-  }
-
-  get progress() {
-    if (!this.steps.length) return 0;
-    const done = this.steps.filter(s => s.done).length;
-    return Math.round((done / this.steps.length) * 100);
-  }
-
-  get formattedTime() {
-    return `${this.minutes}:${this.seconds < 10 ? '0' + this.seconds : this.seconds}`;
-  }
-
-  // 💬 RECORDATORIOS
-  startReminders() {
-    setInterval(() => {
-
-      if (!this.steps.length || this.progress === 100) return;
-
-      const messages = [
-        "💡 Vas bien",
-        "🎯 Solo este paso",
-        "🧠 Avanza poco a poco",
-        "✨ Sin prisa",
-        "🌿 A tu ritmo"
-      ];
-
-      this.motivationalMessage =
-        messages[Math.floor(Math.random() * messages.length)];
-
-      this.cdr.detectChanges();
-
-    }, 15000);
-  }
-
-  // 🔔 NOTIFICACIONES
-  startNotifications() {
-
-    if ("Notification" in window) {
-      Notification.requestPermission();
-    }
-
-      this.notificationsInterval = setInterval(() => {
-
-    if (
-      Notification.permission === "granted" &&
-      this.steps.length &&
-      this.progress < 100 &&
-      !this.sessionPaused // 🔥 AGREGAR ESTO
-    ) {
-      new Notification("🌿 A tu ritmo, sin presión");
-    }
-
-  }, 60000);
-  }
-
-  stopNotifications() {
-    if (this.notificationsInterval) {
-      clearInterval(this.notificationsInterval);
-      this.notificationsInterval = null;
+  checkCompletion() {
+    if (this.progress === 100) {
+      this.pause();
+      this.motivationalMessage = "🎉 ¡Lo lograste!";
     }
   }
 
-  // ⏱️ TIMER
+  // =============================
+  // TIMER
+  // =============================
   start() {
-    if (this.interval) return;
+  // 🚫 No permitir iniciar sin tareas
+  if (!this.steps.length) {
+    alert("⚠️ Primero crea una tarea");
+    return;
+  }
 
-    this.interval = setInterval(() => {
+  if (this.interval) return;
 
-      if (this.seconds === 0) {
-        if (this.minutes === 0) {
-
-          clearInterval(this.interval);
-          this.interval = null;
-
-          this.stopNotifications();
-
-          if (this.progress === 100) {
-            alert("🎉 ¡Completaste!");
-          } else {
-            this.sessionPaused = true;
-          }
-
-          return;
-        }
-
-        this.minutes--;
-        this.seconds = 59;
-
-      } else {
-        this.seconds--;
+  this.interval = setInterval(() => {
+    if (this.seconds === 0) {
+      if (this.minutes === 0) {
+        this.pause();
+        this.sessionPaused = true;
+        return;
       }
+      this.minutes--;
+      this.seconds = 59;
+    } else {
+      this.seconds--;
+    }
+  }, 1000);
+}
 
-      this.saveTimer();
+  pause() {
+    clearInterval(this.interval);
+    this.interval = null;
+  }
 
-    }, 1000);
+  resetTimer() {
+    this.pause();
+    this.minutes = this.parseTimeToMinutes(this.totalTime);
+    this.seconds = 0;
   }
 
   continueSession() {
@@ -302,81 +306,104 @@ export class DashboardComponent implements OnInit {
 
   addTime() {
     this.minutes += 10;
-    this.sessionPaused = false;
     this.start();
   }
 
-  pause() {
-    clearInterval(this.interval);
-    this.interval = null;
+  // =============================
+  // NOTIFICACIONES
+  // =============================
+  startNotifications() {
+    this.notificationsInterval = setInterval(() => {
+      if (this.steps.length && !this.isCompleted) {
+        this.motivationalMessage = "💡 Sigue avanzando";
+        this.showNotification("💡 Sigue avanzando con tu tarea");
+      }
+    }, 180000);
   }
 
-  resetTimer() {
-    clearInterval(this.interval);
-    this.interval = null;
-    this.minutes = this.parseTimeToMinutes(this.totalTime) || 25;
-    this.seconds = 0;
+  stopNotifications() {
+    clearInterval(this.notificationsInterval);
   }
 
-  saveTimer() {
-    localStorage.setItem('timer', JSON.stringify({
-      minutes: this.minutes,
-      seconds: this.seconds
-    }));
+  showNotification(message: string) {
+  if (Notification.permission === "granted") {
+    new Notification("FocusFlow AI", {
+      body: message,
+      icon: "https://cdn-icons-png.flaticon.com/512/2921/2921222.png"
+    });
+   }
   }
 
-  resetAll() {
-    this.taskInput = '';
+  startReminders() {
+    setInterval(() => {
+      if (this.steps.length && !this.isCompleted) {
+        this.motivationalMessage = "✨ Vas bien";
+         this.showNotification("✨ Vas muy bien, no te detengas");
+      }
+    }, 180000);
+  }
+
+  // =============================
+  // UTIL
+  // =============================
+  parseTimeToMinutes(time: string): number {
+    const match = time.match(/\d+/);
+    return match ? parseInt(match[0], 10) : 25;
+  }
+
+  saveSession() {
+    localStorage.setItem('steps', JSON.stringify(this.steps));
+    localStorage.setItem('task', this.taskInput);
+    localStorage.setItem('profile', this.profile);
+  }
+
+  clearTask() {
+    this.pause();
     this.steps = [];
-    this.difficulty = '';
-    this.totalTime = '';
-    this.explanation = '';
-    this.motivationalMessage = '';
-
-    this.stopNotifications();
-
+    this.taskInput = '';
+    this.pdfText = '';
     localStorage.clear();
-    this.resetTimer();
   }
 
   newTask() {
-    this.resetAll();
+    this.clearTask();
     this.focusMode = false;
-    this.sessionPaused = false;
-    this.currentStepIndex = 0;
   }
 
   exportToTeam() {
-    const summary = this.steps
-      .map((s, i) => `${i + 1}. ${s.text}`)
-      .join('\n');
-
-    alert("📊 Reporte:\n\n" + summary);
+    const summary = this.steps.map((s, i) => `${i + 1}. ${s.text}`).join('\n');
+    alert(summary);
   }
 
+  // =============================
+  // READER
+  // =============================
   openReader(text: string) {
-    const speech = new SpeechSynthesisUtterance(text);
-    speech.lang = 'es-ES';
-    speech.rate = 0.9;
-    speechSynthesis.speak(speech);
+
+    if (!(window as any).ImmersiveReader) {
+      alert("❌ SDK no cargado");
+      return;
+    }
+
+    const cleanText = text.replace(/\n/g, ' ');
+
+    this.http.get<any>('http://localhost:3000/getimmersivereaderlaunchparams')
+      .subscribe(res => {
+
+        const data = {
+          title: "FocusFlow AI",
+          chunks: [{ content: cleanText, lang: "es" }]
+        };
+
+        (window as any).ImmersiveReader.launchAsync(
+          res.token,
+          res.subdomain,
+          data
+        );
+      });
   }
 
   speak(text: string) {
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'es-ES';
-    speechSynthesis.speak(utterance);
+    speechSynthesis.speak(new SpeechSynthesisUtterance(text));
   }
-
-  get isCompleted() {
-    return this.progress === 100;
-  }
-
-  simplifyText(text: string) {
-    return text.replace(/,/g, '').split(' ').join(' • ');
-  }
-
-  saveProfile() {
-    localStorage.setItem('profile', this.profile);
-  }
-  
 }

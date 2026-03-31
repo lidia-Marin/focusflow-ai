@@ -1,138 +1,149 @@
 require('dotenv').config();
-
 const express = require('express');
 const cors = require('cors');
 const OpenAI = require('openai');
+const axios = require('axios');
+const qs = require('qs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors({
-  origin: [
-    'http://localhost:4200', // desarrollo
-    'https://focusflow-ai-pi.vercel.app' // tu frontend en Vercel
-  ]
-}));
+app.use(cors({ origin: 'http://localhost:4200' }));
 app.use(express.json());
 
-let client = null;
 
-try {
-  client = new OpenAI({
-    apiKey: process.env.AZURE_OPENAI_KEY,
-    baseURL: `${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT}`,
-    defaultQuery: { 'api-version': '2024-02-15-preview' },
-    defaultHeaders: {
-      'api-key': process.env.AZURE_OPENAI_KEY
-    }
-  });
-} catch (err) {
-  console.log("⚠️ Sin OpenAI, usando fallback");
-}
+// =====================================
+// 🔥 AZURE OPENAI
+// =====================================
+const client = new OpenAI({
+  apiKey: process.env.AZURE_OPENAI_KEY,
+  baseURL: `${process.env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT}`,
+  defaultQuery: { 'api-version': '2024-02-15-preview' },
+  defaultHeaders: { 'api-key': process.env.AZURE_OPENAI_KEY }
+});
 
-function generateFallback(task) {
-  return [
-    { text: `Leer tarea: ${task}`, time: "5", type: "action" },
-    { text: "Dividir en partes", time: "5", type: "action" },
-    { text: "Primer paso", time: "10", type: "action" },
-    { text: "Descanso corto", time: "5", type: "break" },
-    { text: "Continuar", time: "5", type: "action" }
-  ];
-}
+console.log("✅ Azure OpenAI conectado");
 
+
+// =====================================
+// 🧠 ANALYZE
+// =====================================
 app.post('/analyze', async (req, res) => {
   const { task, profile } = req.body;
 
-  if (!task) {
-    return res.status(400).json({ error: "Tarea inválida" });
-  }
-
-  let rules = '';
-
-  if (profile === 'adhd') {
-    rules = "Pasos muy cortos, con descansos frecuentes.";
-  }
-  if (profile === 'autism') {
-    rules = "Estructura clara, ordenada y predecible.";
-  }
-  if (profile === 'dyslexia') {
-    rules = "Lenguaje simple, frases cortas.";
-  }
-
-  if (!client) {
-    return res.json({
-      difficulty: "fácil",
-      totalTime: "25 min",
-      steps: generateFallback(task),
-      explanation: "Se simplificó la tarea para facilitar el enfoque."
-    });
-  }
+  if (!task) return res.status(400).json({ error: "No enviaste tarea" });
 
   try {
-    const response = await Promise.race([
-      client.chat.completions.create({
-        messages: [
-          {
-            role: "system",
-            content: "Ayudas a reducir carga cognitiva con lenguaje calmado."
-          },
-          {
-            role: "user",
-            content: `
-Tarea: ${task}
+    const response = await client.chat.completions.create({
+      messages: [
+        {
+          role: "system",
+          content: "Eres experto en accesibilidad cognitiva. Responde solo JSON."
+        },
+        {
+          role: "user",
+          content: `
+Adapta esta tarea según el perfil: ${profile}
 
-${rules}
+TAREA:
+${task}
 
-Divide en pasos simples con tiempo en minutos.
-Formato:
-1. Paso (X min)
+REGLAS:
+- mínimo 6 pasos
+- cada paso con número (X min)
+- sin markdown
+
+RESPONDE SOLO JSON:
+{
+  "steps": [
+    { "text": "texto", "time": 5 }
+  ],
+  "explanation": "explicación simple",
+  "tone": "tipo lenguaje"
+}
 `
-          }
-        ]
-      }),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("timeout")), 10000)
-      )
-    ]);
+        }
+      ],
+      temperature: 0.6
+    });
 
-    const text = response.choices[0].message.content;
+    let text = response.choices[0].message.content;
 
-    const steps = text.split('\n')
-      .filter(l => l.trim())
-      .map(line => {
-        const match = line.match(/\((\d+)\s*min\)/);
-        const time = match ? match[1] : "5";
+    text = text.replace(/```json|```/g, '').trim();
 
-        return {
-          text: line,
-          time,
-          type: line.toLowerCase().includes("descanso") ? "break" : "action"
-        };
-      });
+    const data = JSON.parse(text);
 
-    const total = steps.reduce((acc, s) => acc + parseInt(s.time), 0);
+    const steps = data.steps.map(s => ({
+      text: s.text,
+      time: parseInt(s.time) || 5,
+      done: false
+    }));
+
+    const total = steps.reduce((acc, s) => acc + s.time, 0);
 
     res.json({
-      difficulty: "media",
+      difficulty: "Dinámica",
       totalTime: `${total} min`,
       steps,
-      explanation: "Dividí la tarea para reducir carga mental y mejorar enfoque."
+      explanation: data.explanation,
+      tone: data.tone
     });
 
   } catch (err) {
+
+    console.log("⚠️ FALLBACK ACTIVADO");
+
     res.json({
-      difficulty: "fácil",
-      totalTime: "25 min",
-      steps: generateFallback(task),
-      explanation: "Se usó método simple para evitar sobrecarga."
+      difficulty: "Fallback",
+      totalTime: "15 min",
+      steps: [
+        { text: "Leer tarea", time: 5, done: false },
+        { text: "Dividir en partes", time: 5, done: false },
+        { text: "Ejecutar", time: 5, done: false }
+      ],
+      explanation: "Modo seguro",
+      tone: "simple"
     });
   }
 });
 
-app.get('/health', (req, res) => {
-  res.json({ ok: true });
+
+// =====================================
+// 📖 IMMERSIVE READER (CORRECTO CON ENTRA ID)
+// =====================================
+app.get('/getimmersivereaderlaunchparams', async (req, res) => {
+
+  try {
+    const response = await axios.post(
+      `https://login.microsoftonline.com/${process.env.TENANT_ID}/oauth2/v2.0/token`,
+      new URLSearchParams({
+        grant_type: 'client_credentials',
+        client_id: process.env.CLIENT_ID,
+        client_secret: process.env.CLIENT_SECRET,
+        scope: 'https://cognitiveservices.azure.com/.default'
+      }),
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
+      }
+    );
+
+    const token = response.data.access_token;
+
+    res.json({
+      token: token,
+      subdomain: process.env.SUBDOMAIN
+    });
+
+  } catch (error) {
+    console.error("❌ ERROR REAL:", error.response?.data || error.message);
+    res.status(500).send("Error en Reader");
+  }
 });
 
+
+// =====================================
 app.listen(PORT, () => {
-  console.log(`🚀 http://localhost:${PORT}`);
+  console.log(`🚀 Backend corriendo en http://localhost:${PORT}`);
 });
