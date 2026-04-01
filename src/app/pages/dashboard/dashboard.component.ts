@@ -145,7 +145,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
     this.loading = true;
 
-    this.http.post<any>('http://localhost:3000/analyze', {
+    this.http.post<any>('https://TU-URL/api/analyze', {
       task: finalText,
       profile: this.profile
     })
