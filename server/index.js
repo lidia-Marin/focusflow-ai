@@ -8,11 +8,7 @@ const qs = require('qs');
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-app.use(cors({
-  origin: '*', 
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+app.use(cors()); // Permite todo durante el desarrollo
 app.use(express.json());
 
 

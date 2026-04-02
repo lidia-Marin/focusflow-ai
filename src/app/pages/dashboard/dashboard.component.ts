@@ -145,7 +145,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
     this.loading = true;
 
-    this.http.post<any>('https://TU-URL/api/analyze', {
+    this.http.post<any>('https://focusflow-server-cefdbsgvb3c5f4ha.canadacentral-01.azurewebsites.net/analyze', {
       task: finalText,
       profile: this.profile
     })
@@ -387,7 +387,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
     const cleanText = text.replace(/\n/g, ' ');
 
-    this.http.get<any>('http://localhost:3000/getimmersivereaderlaunchparams')
+    this.http.get<any>('https://focusflow-server-cefdbsgvb3c5f4ha.canadacentral-01.azurewebsites.net/getimmersivereaderlaunchparams')
       .subscribe(res => {
 
         const data = {
