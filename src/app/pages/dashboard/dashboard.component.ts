@@ -231,15 +231,20 @@ export class DashboardComponent implements OnInit, OnDestroy {
   // =============================
   toggleStepWithTime(index: number) {
     const step = this.steps[index];
+
+     step.done = !step.done;
+
     const time = parseInt(step.time) || 0;
 
-    step.done = !step.done;
 
-    this.minutes += step.done ? -time : time;
+    if (step.done) {
+    this.minutes -= time;
+    } else {
+      this.minutes += time;
+    }
 
     this.checkCompletion();
     this.saveSession();
-    this.cdr.detectChanges();
   }
 
   completeStepFromFocus() {

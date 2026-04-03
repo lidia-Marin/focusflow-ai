@@ -62,11 +62,17 @@
     <!-- PROGRESO -->
      <div *ngIf="steps.length || loading" class="mt-6">
       <div class="w-full bg-gray-200 rounded-full h-4">
-        <div class="bg-indigo-400 h-4 rounded-full"
-          [style.width.%]="progress">
+
+        <!-- 👇 animación + fallback cuando carga -->
+        <div class="bg-indigo-400 h-4 rounded-full transition-all duration-500"
+            [style.width.%]="loading ? 30 : progress">
         </div>
+
       </div>
-      <p class="text-center mt-2">{{ progress }}%</p>
+
+      <p class="text-center mt-2">
+        {{ loading ? 'Analizando...' : (progress + '%') }}
+      </p>
     </div>
 
     <!-- 🔥 FOCUS MODE -->
@@ -119,9 +125,9 @@
 
         <div>
           <input type="checkbox"
-            [(ngModel)]="step.done"
-            (change)="toggleStepWithTime(i)"
-            class="mr-2">
+          [checked]="step.done"
+          (change)="toggleStepWithTime(i)"
+          class="mr-2">
 
           {{ profile === 'dyslexia' ? simplifyText(step.text) : step.text }}
           ({{ step.time }} min)
