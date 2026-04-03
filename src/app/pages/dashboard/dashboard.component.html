@@ -60,7 +60,7 @@
     </div>
 
     <!-- PROGRESO -->
-    <div *ngIf="steps.length" class="mt-6">
+     <div *ngIf="steps.length || loading" class="mt-6">
       <div class="w-full bg-gray-200 rounded-full h-4">
         <div class="bg-indigo-400 h-4 rounded-full"
           [style.width.%]="progress">

@@ -143,7 +143,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
       return;
     }
 
+    
+    this.steps = [];
     this.loading = true;
+    this.motivationalMessage = '';
+    this.cdr.detectChanges();
 
     this.http.post<any>('https://focusflow-server-cefdbsgvb3c5f4ha.canadacentral-01.azurewebsites.net/analyze', {
       task: finalText,
@@ -172,6 +176,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       error: () => {
         this.loading = false;
         alert("❌ Error analizando");
+         this.cdr.detectChanges();
       }
     });
   }
@@ -226,9 +231,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
   // =============================
   toggleStepWithTime(index: number) {
     const step = this.steps[index];
-    step.done = !step.done;
-
     const time = parseInt(step.time) || 0;
+
+    step.done = !step.done;
 
     this.minutes += step.done ? -time : time;
 
