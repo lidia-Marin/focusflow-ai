@@ -147,6 +147,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.steps = [];
     this.loading = true;
     this.motivationalMessage = '';
+    this.difficulty = '';
+    this.totalTime = '';
     this.cdr.detectChanges();
 
     this.http.post<any>('https://focusflow-server-cefdbsgvb3c5f4ha.canadacentral-01.azurewebsites.net/analyze', {
@@ -171,6 +173,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         this.seconds = 0;
 
         this.loading = false;
+        this.saveSession();
         this.cdr.detectChanges();
       },
       error: () => {
@@ -231,20 +234,18 @@ export class DashboardComponent implements OnInit, OnDestroy {
   // =============================
   toggleStepWithTime(index: number) {
     const step = this.steps[index];
-
-     step.done = !step.done;
-
     const time = parseInt(step.time) || 0;
-
+    
 
     if (step.done) {
-    this.minutes -= time;
-    } else {
-      this.minutes += time;
-    }
+    this.minutes = Math.max(0, this.minutes - time); 
+  } else {
+    this.minutes += time;
+  }
 
-    this.checkCompletion();
-    this.saveSession();
+  this.cdr.detectChanges(); 
+  this.saveSession();
+  this.checkCompletion();
   }
 
   completeStepFromFocus() {
